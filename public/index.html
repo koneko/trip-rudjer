@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>TRIP</title>
+		<link rel="stylesheet" href="style.css" />
+	</head>
+	<body></body>
+	<script src="./socket.io/socket.io.js"></script>
+	<script>
+		// To have it globally
+		const socket = io();
+	</script>
+	<script src="./scripts/load.js"></script>
+	<script src="./scripts/changeBackgroundImage.js"></script>
+	<script src="./scripts/errorHandler.js"></script>
+	<script src="./scripts/populateLobbies.js"></script>
+	<script src="./scripts/createGame.js"></script>
+	<script src="./scripts/joinGame.js"></script>
+	<script src="./scripts/setname.js"></script>
+	<script>
+		changeBackgroundImage("trip-1.jpg");
+		if (
+			!localStorage.getItem("TRIP_ime") ||
+			!localStorage.getItem("TRIP_prezime")
+		)
+			load("./html/choose-name.html");
+		else {
+			changeBackgroundImage("trip-empty.jpg");
+			load("./html/main.html");
+			socket.emit("getLobbies");
+			socket.on("lobbiesList", (lobbies) => {
+				console.log(lobbies);
+				populateLobbies(lobbies);
+			});
+		}
+	</script>
+</html>
