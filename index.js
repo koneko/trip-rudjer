@@ -7,21 +7,44 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-let lobbies = [
-	{
-		id: "test123",
-		name: "Test Lobby",
-		hostName: "Test Host",
-		hostSocket: null,
-		players: [
-			{
-				ime: "Test",
-				prezime: "Player",
-				socket: null,
-			},
-		],
-	},
+const allFolders = [
+	"frames_amongus",
+	"frames_babyyoda",
+	"frames_cat01",
+	"frames_cat02",
+	"frames_cat03",
+	"frames_cat04",
+	"frames_cat05",
+	"frames_cat06",
+	"frames_creeper",
+	"frames_darthvader",
+	"frames_eiffeltower",
+	"frames_hellokitty",
+	"frames_homersimpson",
+	"frames_hulk",
+	"frames_ironman",
+	"frames_monalisa",
+	"frames_nyancat",
+	"frames_pepe",
+	"frames_pikachu",
+	"frames_rickroll",
+	"frames_shiba",
+	"frames_spiderman",
+	"frames_spongebob",
+	"frames_spooderman",
+	"frames_statueofliberty",
+	"frames_supermario",
+	"frames_windowsxphill",
 ];
+
+let lobby = {
+	hostSocket: null,
+	pin: null,
+	connectedPlayers: [],
+	state: {
+		folder: null,
+	},
+};
 
 app.use(express.static("public"));
 
@@ -32,70 +55,50 @@ app.get("/", (req, res) => {
 // Handle socket.io connections
 io.on("connection", (socket) => {
 	socket.on("disconnect", () => {
-		const lobby = lobbies.find((lobby) => lobby.hostSocket === socket);
-		if (lobby) {
-			console.log(
-				`Lobby "${lobby.name}" hosted by "${lobby.hostName}" has been removed.`
-			);
-			lobby.players.forEach((player) => {
-				player.socket.emit("lobbyClose", lobby.id);
+		if (lobby.hostSocket === socket) {
+			lobby.hostSocket = null;
+			lobby.pin = null;
+			lobby.connectedPlayers.forEach((player) => {
+				player.socket.emit("lobbyClose");
 			});
+			lobby.connectedPlayers = [];
+			console.log("Host disconnected. Lobby cleared.");
+		} else {
+			let player = lobby.connectedPlayers.find(
+				(player) => player.socket == socket
+			);
+			if (!player) return;
+			lobby.hostSocket.emit(
+				"playerDisconnect",
+				`${player.ime} ${player.prezime}`
+			);
+			// If a player disconnects, remove them from the connected players
+			lobby.connectedPlayers = lobby.connectedPlayers.filter(
+				(player) => player.socket !== socket
+			);
 		}
-		lobbies = lobbies.filter((lobby) => lobby.hostSocket !== socket);
 	});
 
 	socket.on("create", (msg) => {
-		const existingLobby = lobbies.find((lobby) =>
-			lobby.players.some((player) => player.socket === socket)
-		);
-
-		if (existingLobby) {
-			socket.emit("error", "You are already in another lobby.");
-			return;
-		}
-		lobbies.push({
-			id: Math.random().toString(36).substr(2, 9),
-			name: randomLobbyName(),
-			hostName: `${msg.ime} ${msg.prezime}`,
-			hostSocket: socket,
-			players: [
-				{
-					ime: msg.ime,
-					prezime: msg.prezime,
-					socket: socket,
-				},
-			],
-		});
-		socket.emit("lobbyCreated", {
-			id: lobbies[lobbies.length - 1].id,
-			name: lobbies[lobbies.length - 1].name,
-		});
+		if (msg != "abcdefgh")
+			return socket.emit("error", "403 Not authorized.");
+		lobby.hostSocket = socket;
+		lobby.pin = Math.floor(1000 + Math.random() * 9000); // Generates a random 4-digit PIN
+		lobby.connectedPlayers = [];
+		socket.emit("createdLobby", lobby.pin);
 	});
 
 	socket.on("join", (msg) => {
-		const lobby = lobbies.find((lobby) => lobby.id === msg.lobbyId);
-
-		if (!lobby) {
-			socket.emit("error", "Lobby not found.");
-			return;
+		console.log(msg.pin, lobby.pin);
+		if (msg.pin != lobby.pin) {
+			return socket.emit("error", "Invalid PIN.");
 		}
-
-		const isAlreadyInLobby = lobby.players.some(
-			(player) => player.socket === socket
-		);
-
-		if (isAlreadyInLobby) {
-			socket.emit("error", "You are already in this lobby.");
-			return;
-		}
-
-		lobby.players.push({
+		socket.emit("joined");
+		lobby.connectedPlayers.push({
+			socket: socket,
 			ime: msg.ime,
 			prezime: msg.prezime,
-			socket: socket,
 		});
-
-		socket.emit("joined", { lobbyId: lobby.id, lobbyName: lobby.name });
 		lobby.hostSocket.emit("playerJoined", {
 			ime: msg.ime,
 			prezime: msg.prezime,

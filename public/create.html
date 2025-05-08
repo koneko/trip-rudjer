@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>TRIP</title>
+		<link rel="stylesheet" href="style.css" />
+	</head>
+	<body></body>
+	<script src="./socket.io/socket.io.js"></script>
+	<script>
+		// To have it globally
+		const socket = io();
+	</script>
+	<script src="./scripts/load.js"></script>
+	<script src="./scripts/changeBackgroundImage.js"></script>
+	<script src="./scripts/errorHandler.js"></script>
+	<script src="./scripts/host.js"></script>
+	<script>
+		changeBackgroundImage("trip-empty.jpg");
+		load("./html/host.html");
+		socket.emit("create", localStorage.getItem("TRIP_ADMIN"));
+		socket.on("createdLobby", (pin) => {
+			document.getElementById("pin").textContent = `PIN: ${pin}`;
+		});
+		socket.on("playerJoined", (msg) => {
+			const playersDiv = document.querySelector(".players");
+			const playerElement = document.createElement("div");
+			playerElement.textContent = msg.ime + " " + msg.prezime;
+			playersDiv.appendChild(playerElement);
+		});
+		socket.on("playerDisconnect", (msg) => {
+			const playersDiv = document.querySelector(".players");
+			const playerElements = Array.from(playersDiv.children);
+			console.log(playerElements);
+			const playerToRemove = playerElements.find(
+				(player) => player.textContent === msg
+			);
+			if (playerToRemove) {
+				playersDiv.removeChild(playerToRemove);
+			}
+		});
+	</script>
+</html>

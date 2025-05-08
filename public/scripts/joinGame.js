@@ -1,16 +1,13 @@
-function joinGame(id) {
+function joinViaID() {
 	const ime = localStorage.getItem("TRIP_ime");
 	const prezime = localStorage.getItem("TRIP_prezime");
-	socket.emit("join", { ime, prezime, lobbyId: id });
-}
-
-function joinViaID() {
 	const id = document.getElementById("join-via-id").value;
 	if (id) {
-		socket.emit("join", { ime, prezime, lobbyId: id });
+		console.log({ ime, prezime, pin: id });
+		socket.emit("join", { ime, prezime, pin: id });
 	}
 }
 
-socket.on("joined", (msg) => {
+socket.on("joined", () => {
 	load("./html/waiting.html");
 });
