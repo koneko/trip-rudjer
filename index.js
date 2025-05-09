@@ -6,6 +6,7 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+const TRIP_ADMIN = "abcdefgh";
 
 const allFolders = [
 	"frames_amongus",
@@ -43,8 +44,13 @@ let lobby = {
 	connectedPlayers: [],
 	state: {
 		folder: null,
+		guesses: [],
+		timeLeftInSeconds: 30,
+		round: 1,
 	},
 };
+
+let interval = null;
 
 app.use(express.static("public"));
 
@@ -80,11 +86,17 @@ io.on("connection", (socket) => {
 	});
 
 	socket.on("create", (msg) => {
-		if (msg != "abcdefgh")
+		if (msg != TRIP_ADMIN)
 			return socket.emit("error", "403 Not authorized.");
 		lobby.hostSocket = socket;
 		lobby.pin = Math.floor(1000 + Math.random() * 9000); // Generates a random 4-digit PIN
 		lobby.connectedPlayers = [];
+		lobby.state = {
+			folder: null,
+			guesses: [],
+			timeLeftInSeconds: 30,
+			round: 1,
+		};
 		socket.emit("createdLobby", lobby.pin);
 	});
 
@@ -98,6 +110,8 @@ io.on("connection", (socket) => {
 			socket: socket,
 			ime: msg.ime,
 			prezime: msg.prezime,
+			points: 0,
+			guesses: [],
 		});
 		lobby.hostSocket.emit("playerJoined", {
 			ime: msg.ime,
@@ -105,62 +119,161 @@ io.on("connection", (socket) => {
 		});
 	});
 
-	socket.on("getLobbies", () => {
-		socket.emit(
-			"lobbiesList",
-			lobbies.map((lobby) => ({
-				id: lobby.id,
-				name: lobby.name,
-				hostName: lobby.hostName,
-				playerCount: lobby.players.length,
-			}))
+	socket.on("playerGuess", (msg) => {
+		const player = lobby.connectedPlayers.find(
+			(player) => player.socket === socket
 		);
+		if (!player) {
+			socket.emit("error", "You are not part of the game.");
+			return;
+		}
+		if (msg == "correct") {
+			player.points += 10; // Award points for a correct guess
+			socket.emit("correctGuess", player.points);
+			lobby.hostSocket.emit("playerCorrectGuess", {
+				ime: player.ime,
+				prezime: player.prezime,
+				points: player.points,
+			});
+		} else {
+			socket.emit("incorrectGuess");
+			lobby.hostSocket.emit("playerIncorrectGuess", {
+				ime: player.ime,
+				prezime: player.prezime,
+				guess: msg,
+			});
+		}
+		player.guesses.push(msg);
+		// Check if all players have guessed
+		const allPlayersGuessed = lobby.connectedPlayers.every(
+			(player) => player.points > 0 || lobby.state.guesses.includes(msg)
+		);
+
+		if (allPlayersGuessed) {
+			lobby.state.timeLeftInSeconds = 0;
+		}
+	});
+
+	socket.on("startGame", (msg) => {
+		if (msg != TRIP_ADMIN)
+			return socket.emit("error", "403 Not authorized.");
+		const randomIndex = Math.floor(Math.random() * allFolders.length);
+		lobby.state.folder = allFolders[randomIndex];
+		lobby.state.guesses = [];
+		while (lobby.state.guesses.length < 3) {
+			const randomGuessIndex = Math.floor(
+				Math.random() * allFolders.length
+			);
+			const randomGuess = allFolders[randomGuessIndex];
+			if (
+				randomGuess !== lobby.state.folder &&
+				!lobby.state.guesses.includes(randomGuess)
+			) {
+				lobby.state.guesses.push(randomGuess);
+			}
+		}
+		lobby.hostSocket.emit("startGame", {
+			image: lobby.state.folder,
+			guesses: lobby.state.guesses,
+		});
+		lobby.connectedPlayers.forEach((player) => {
+			player.socket.emit("startGame", {
+				image: lobby.state.folder,
+				guesses: lobby.state.guesses,
+			});
+		});
+		// Start a timer that runs every 30 seconds
+		interval = setInterval(() => {
+			if (lobby.state.timeLeftInSeconds > 0) {
+				lobby.state.timeLeftInSeconds -= 1;
+				lobby.hostSocket.emit(
+					"updateTime",
+					lobby.state.timeLeftInSeconds
+				);
+				lobby.connectedPlayers.forEach((player) => {
+					player.socket.emit(
+						"updateTime",
+						lobby.state.timeLeftInSeconds
+					);
+				});
+			} else {
+				// Time is up, notify players and reset the game state
+				lobby.hostSocket.emit("timeUp");
+				lobby.connectedPlayers.forEach((player) => {
+					player.socket.emit("timeUp");
+				});
+				lobby.state.timeLeftInSeconds = 30; // Reset timer
+				if (!lobby.state.round) {
+					lobby.state.round = 1;
+				} else {
+					lobby.state.round += 1;
+				}
+
+				if (lobby.state.round > 5) {
+					// End the game after 5 rounds
+					lobby.hostSocket.emit("gameOver");
+					lobby.connectedPlayers.forEach((player) => {
+						player.socket.emit("gameOver");
+					});
+					lobby.state.rounds = 0; // Reset rounds
+					return;
+				}
+
+				const nextRandomIndex = Math.floor(
+					Math.random() * allFolders.length
+				);
+				lobby.state.folder = allFolders[nextRandomIndex];
+				lobby.state.guesses = [];
+				while (lobby.state.guesses.length < 3) {
+					const randomGuessIndex = Math.floor(
+						Math.random() * allFolders.length
+					);
+					const randomGuess = allFolders[randomGuessIndex];
+					if (
+						randomGuess !== lobby.state.folder &&
+						!lobby.state.guesses.includes(randomGuess)
+					) {
+						lobby.state.guesses.push(randomGuess);
+					}
+				}
+				lobby.hostSocket.emit("nextRound", {
+					image: lobby.state.folder,
+					guesses: lobby.state.guesses,
+				});
+				lobby.connectedPlayers.forEach((player) => {
+					player.socket.emit("nextRound", {
+						image: lobby.state.folder,
+						guesses: lobby.state.guesses,
+					});
+				});
+			}
+		}, 1000);
+	});
+
+	socket.on("getGameState", () => {
+		if (!lobby.state.folder) {
+			socket.emit("error", "No game is currently ongoing.");
+			return;
+		}
+		socket.emit("gameState", {
+			lobby: {
+				pin: lobby.pin,
+				connectedPlayers: lobby.connectedPlayers.map((player) => ({
+					ime: player.ime,
+					prezime: player.prezime,
+					points: player.points,
+				})),
+				state: {
+					folder: lobby.state.folder,
+					guesses: lobby.state.guesses,
+					timeLeftInSeconds: lobby.state.timeLeftInSeconds,
+					round: lobby.state.round,
+				},
+			},
+		});
 	});
 });
 
 server.listen(PORT, () => {
 	console.log(`Server is running on http://localhost:${PORT}`);
 });
-
-function randomLobbyName() {
-	const adjectives = [
-		"Quick",
-		"Lazy",
-		"Happy",
-		"Brave",
-		"Clever",
-		"Bold",
-		"Bright",
-		"Calm",
-		"Eager",
-		"Gentle",
-		"Kind",
-		"Loyal",
-		"Noble",
-		"Proud",
-		"Sharp",
-		"Witty",
-	];
-	const animals = [
-		"Fox",
-		"Bear",
-		"Eagle",
-		"Tiger",
-		"Wolf",
-		"Lion",
-		"Panther",
-		"Hawk",
-		"Falcon",
-		"Leopard",
-		"Otter",
-		"Rabbit",
-		"Deer",
-		"Owl",
-		"Dolphin",
-		"Shark",
-	];
-	const randomAdjective =
-		adjectives[Math.floor(Math.random() * adjectives.length)];
-	const randomAnimal = animals[Math.floor(Math.random() * animals.length)];
-	return `${randomAdjective} ${randomAnimal}`;
-}
